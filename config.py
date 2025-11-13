@@ -1,74 +1,218 @@
-# config.py
-import os
-from dotenv import load_dotenv
+# bot.py
+import vk_api
+from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
+from vk_api.utils import get_random_id
+from config import Config
+import logging
+import time
+import re
+import json
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
-class Config:
-    # VK настройки
-    VK_GROUP_TOKEN = os.getenv('VK_GROUP_TOKEN')
-    VK_GROUP_ID = os.getenv('VK_GROUP_ID')
-    API_VERSION = '5.131'
+class FotoTochkaBot:
+    def __init__(self):
+        logger.info("Инициализация бота ФотоТочка...")
+        self.vk_session = vk_api.VkApi(token=Config.VK_GROUP_TOKEN)
+        self.longpoll = VkBotLongPoll(self.vk_session, Config.VK_GROUP_ID)
+        self.vk = self.vk_session.get_api()
+        self.user_sessions = {}
+        logger.info("Бот ФотоТочка инициализирован успешно")
     
-    # Настройки бота
-    BOT_SETTINGS = {
-        "max_history": 3,
-        "typing_delay": 0.5
-    }
+    def create_keyboard(self, keyboard_name):
+        """Создание клавиатуры по имени"""
+        if keyboard_name in Config.KEYBOARDS:
+            return Config.KEYBOARDS[keyboard_name]
+        return None
     
-    # БАЗА ЗНАНИЙ ДЛЯ ФОТОТОЧКА
-    KNOWLEDGE_BASE = {
-        # Основные команды
-        "start": "📸 Добро пожаловать в ФотоТочка!\n\nЯ ваш помощник по фотопечати и фотокнигам. Расскажите, чем могу помочь? ✨",
-        
-        "help": "📋 ФотоТочка - команды помощника:\n\n🖼️ О услугах:\n• /services - наши услуги\n• /price - цены на печать\n• /photobook - фотокниги\n• /canvas - печать на холсте\n\n📞 Контакты:\n• /contacts - контакты\n• /address - адрес\n• /schedule - график работы\n\n❓ Помощь:\n• /help - эта справка\n• /delivery - доставка\n• /payment - оплата",
-        
-        "clear": "🗑️ История диалога очищена! Чем могу помочь?",
-        
-        # УСЛУГИ И ПЕЧАТЬ
-        "услуг": "🖼️ Услуги ФотоТочка:\n\n📷 Фотопечать:\n• Стандартные форматы (10×15, 15×21)\n• Крупные форматы (А4, А3, А2)\n• Полароид стиль\n• Фотокружки и сувениры\n\n📚 Фотокниги:\n• Классические фотокниги\n• Фотоальбомы премиум\n• Подарочные издания\n\n🎨 Дополнительно:\n• Реставрация фото\n• Цифровая обработка\n• Создание коллажей",
-        
-        "печать": "🖨️ Фотопечать в ФотоТочка:\n\n📏 Форматы и цены:\n• 10×15 см - 15 руб\n• 15×21 см - 25 руб\n• А4 (21×30 см) - 50 руб\n• А3 (30×42 см) - 100 руб\n\n⚡ Сроки изготовления:\n• Стандартные - 1-2 часа\n• Срочные - 30 минут (+50%)",
-        
-        "фотокниг": "📚 Фотокниги ФотоТочка:\n\n📖 Типы фотокниг:\n• Классическая (20 стр) - 1500 руб\n• Премиум (30 стр) - 2500 руб\n• Подарочная (40 стр) - 3500 руб\n\n🛠️ Производство:\n• Срок - 3-5 дней\n• Дизайн включен\n• Твердая обложка",
-        
-        "холст": "🎨 Печать на холсте:\n\n🖼️ Форматы холста:\n• 30×40 см - 1200 руб\n• 40×60 см - 1800 руб\n• 50×70 см - 2500 руб\n• 60×90 см - 3500 руб\n\n✨ Включено:\n• Натяжка на подрамник\n• Покрытие лаком\n• Готово к размещению",
-        
-        # ЦЕНЫ
-        "цена": "💎 Цены ФотоТочка:\n\n🖨️ Фотопечать:\n• 10×15 см - 15 руб\n• 15×21 см - 25 руб\n• А4 - 50 руб\n• А3 - 100 руб\n\n📚 Фотокниги:\n• Классическая - 1500 руб\n• Премиум - 2500 руб\n• Подарочная - 3500 руб\n\n🎨 Холст:\n• 30×40 см - 1200 руб\n• 40×60 см - 1800 руб",
-        
-        # КОНТАКТЫ И АДРЕС
-        "контакт": "📞 Контакты ФотоТочка:\n\n📍 Адрес: ул. Примерная, д. 123\n🚇 Метро: Центральная\n📱 Телефон: +7 (999) 123-45-67\n✉️ Email: fototo4ka@example.com\n\n📲 Соцсети:\n• Instagram: @fototo4ka\n• Telegram: @fototo4ka_bot",
-        
-        "адрес": "📍 ФотоТочка находится:\n\nул. Примерная, д. 123\n🚇 Станция метро: Центральная\n🚍 Автобусы: 12, 45, 67\n🚗 Парковка: бесплатная во дворе\n\n⏰ График: Пн-Вс 10:00-20:00",
-        
-        "график": "🕒 График работы ФотоТочка:\n\nПонедельник - Пятница:\n• 10:00 - 20:00\n\nСуббота - Воскресенье:\n• 11:00 - 18:00\n\n📞 Телефон: +7 (999) 123-45-67",
-        
-        # ДОСТАВКА И ОПЛАТА
-        "доставк": "🚚 Доставка ФотоТочка:\n\n🏠 По городу:\n• Курьером - 200 руб\n• Бесплатно от 2000 руб\n\n📮 По России:\n• Почта России - от 300 руб\n• СДЭК - от 500 руб\n\n⚡ Самовывоз:\n• Бесплатно\n• Готово за 1-2 часа",
-        
-        "оплат": "💳 Оплата в ФотоТочка:\n\nНаличными:\n• В салоне\n• Курьеру\n\nБезналичный расчет:\n• Картой в салоне\n• Онлайн перевод\n• QR-код",
-        
-        # ОБЩИЕ ОТВЕТЫ
-        "привет": "👋 Привет! Добро пожаловать в ФотоТочка! 📸\n\nЧем могу помочь?",
-        
-        "здравствуйте": "👋 Здравствуйте! Рады видеть вас в ФотоТочка! ✨\n\nРасскажите, что вас интересует?",
-        
-        "спасибо": "🙏 Пожалуйста! Обращайтесь ещё! 📸",
-        
-        # ОТВЕТ ПО УМОЛЧАНИЮ
-        "непонятно": "🤔 Извините, я не совсем понял вопрос о фотопечати.\n\nМожете уточнить или посмотреть:\n• /services - все услуги\n• /price - цены\n• /contacts - контакты\n\n📞 Или позвоните нам: +7 (999) 123-45-67"
-    }
+    def send_message(self, user_id, message, keyboard_name="main"):
+        """Отправка сообщения с клавиатурой"""
+        try:
+            keyboard = self.create_keyboard(keyboard_name)
+            keyboard_json = json.dumps(keyboard) if keyboard else None
+            
+            if len(message) > 4096:
+                chunks = [message[i:i+4096] for i in range(0, len(message), 4096)]
+                for i, chunk in enumerate(chunks):
+                    # Клавиатуру отправляем только с последним сообщением
+                    current_keyboard = keyboard_json if i == len(chunks) - 1 else None
+                    self.vk.messages.send(
+                        user_id=user_id,
+                        message=chunk,
+                        random_id=get_random_id(),
+                        keyboard=current_keyboard
+                    )
+                    time.sleep(Config.BOT_SETTINGS["typing_delay"])
+            else:
+                self.vk.messages.send(
+                    user_id=user_id,
+                    message=message,
+                    random_id=get_random_id(),
+                    keyboard=keyboard_json
+                )
+            logger.info(f"Сообщение отправлено пользователю {user_id} с клавиатурой {keyboard_name}")
+        except Exception as e:
+            logger.error(f"Ошибка отправки сообщения: {e}")
     
-    @classmethod
-    def validate(cls):
-        required = {
-            'VK_GROUP_TOKEN': cls.VK_GROUP_TOKEN,
-            'VK_GROUP_ID': cls.VK_GROUP_ID
+    def get_user_session(self, user_id):
+        """Получение сессии пользователя"""
+        if user_id not in self.user_sessions:
+            self.user_sessions[user_id] = {
+                'history': [],
+                'message_count': 0,
+                'last_questions': []
+            }
+        return self.user_sessions[user_id]
+    
+    def find_best_answer(self, text):
+        """Поиск лучшего ответа в базе знаний"""
+        text_lower = text.lower().strip()
+        clean_text = re.sub(r'[^\w\s]', '', text_lower)
+        
+        # Сопоставление текста кнопок с ответами
+        button_text_map = {
+            "📚 услуги": "услуг",
+            "💎 цены": "цена", 
+            "📞 контакты": "контакт",
+            "🚚 доставка": "доставк",
+            "💳 оплата": "оплат",
+            "🆘 помощь": "help",
+            "📖 фотокниги": "фотокниг",
+            "🎨 холсты": "холст",
+            "🔧 реставрация": "реставрац",
+            "💻 обработка": "обработк",
+            "📧 email": "email",
+            "🔙 назад": "назад"
         }
         
-        missing = [name for name, value in required.items() if not value]
-        if missing:
-            raise ValueError(f"Отсутствуют переменные: {', '.join(missing)}")
-
-Config.validate()
+        # Проверка текста кнопок
+        if text in button_text_map:
+            return Config.KNOWLEDGE_BASE[button_text_map[text]]
+        
+        # Проверка команд
+        command_map = {
+            '/start': 'start',
+            'start': 'start',
+            'начать': 'start',
+            '/help': 'help', 
+            'help': 'help',
+            'помощь': 'help',
+            '/clear': 'clear',
+            'clear': 'clear',
+            'очистить': 'clear',
+            '/services': 'услуг',
+            'services': 'услуг',
+            'услуги': 'услуг',
+            '/price': 'цена',
+            'price': 'цена',
+            'цены': 'цена',
+            '/photobook': 'фотокниг',
+            'photobook': 'фотокниг',
+            'фотокниг': 'фотокниг',
+            '/canvas': 'холст',
+            'canvas': 'холст',
+            'холст': 'холст',
+            '/contacts': 'контакт',
+            'contacts': 'контакт',
+            'контакты': 'контакт',
+            '/delivery': 'доставк',
+            'delivery': 'доставк',
+            'доставк': 'доставк',
+            '/payment': 'оплат',
+            'payment': 'оплат',
+            'оплат': 'оплат'
+        }
+        
+        if text_lower in command_map:
+            return Config.KNOWLEDGE_BASE[command_map[text_lower]]
+        
+        # Поиск по ключевым словам
+        keywords_priority = [
+            ['фотокниг', 'фотоальбом', 'альбом', 'книг'],
+            ['холст', 'картин', 'полотно'],
+            ['реставрац', 'восстановлени', 'старое фото'],
+            ['обработк', 'photoshop', 'редактор', 'коллаж'],
+            ['сколько стоит', 'цена', 'стоимость', 'прайс', 'ценник'],
+            ['контакт', 'email', 'связаться', 'instagram', 'telegram'],
+            ['доставк', 'курьер', 'самовывоз', 'забрать', 'привезти'],
+            ['оплат', 'рассчет', 'картой', 'наличными', 'безнал'],
+            ['привет', 'здравствуйте', 'добрый', 'доброе'],
+            ['спасибо', 'благодарю'],
+            ['назад', 'вернуться']
+        ]
+        
+        for keyword_group in keywords_priority:
+            for keyword in keyword_group:
+                if keyword in clean_text:
+                    for kb_key, answer_data in Config.KNOWLEDGE_BASE.items():
+                        if kb_key in keyword_group:
+                            logger.info(f"Найден ответ по ключевому слову: {keyword}")
+                            return answer_data
+        
+        # Ответ по умолчанию
+        return Config.KNOWLEDGE_BASE['непонятно']
+    
+    def update_user_history(self, user_id, user_message, bot_response):
+        """Обновление истории диалога пользователя"""
+        user_session = self.get_user_session(user_id)
+        user_session['history'].append({
+            'user': user_message,
+            'bot': bot_response
+        })
+        user_session['last_questions'].append(user_message.lower())
+        if len(user_session['last_questions']) > 5:
+            user_session['last_questions'].pop(0)
+        user_session['message_count'] += 1
+        max_history = Config.BOT_SETTINGS["max_history"]
+        if len(user_session['history']) > max_history:
+            user_session['history'] = user_session['history'][-max_history:]
+    
+    def is_repeated_question(self, user_id, current_message):
+        """Проверка на повторяющийся вопрос"""
+        user_session = self.get_user_session(user_id)
+        current_lower = current_message.lower()
+        for prev_question in user_session['last_questions']:
+            words_current = set(current_lower.split())
+            words_prev = set(prev_question.split())
+            common_words = words_current.intersection(words_prev)
+            if len(common_words) >= 2:
+                return True
+        return False
+    
+    def get_contextual_response(self, user_id, current_message):
+        """Получение контекстного ответа на основе истории"""
+        user_session = self.get_user_session(user_id)
+        if self.is_repeated_question(user_id, current_message):
+            return Config.KNOWLEDGE_BASE['непонятно']
+        if user_session['message_count'] == 0 and any(word in current_message.lower() for word in ['привет', 'здравствуй', 'start']):
+            return Config.KNOWLEDGE_BASE['start']
+        return self.find_best_answer(current_message)
+    
+    def run(self):
+        """Запуск бота"""
+        logger.info("Бот ФотоТочка начал прослушивание сообщений...")
+        while True:
+            try:
+                for event in self.longpoll.listen():
+                    if event.type == VkBotEventType.MESSAGE_NEW:
+                        message = event.object.message
+                        user_id = message['from_id']
+                        text = message['text'].strip()
+                        if not text:
+                            continue
+                        logger.info(f"Сообщение от {user_id}: {text}")
+                        try:
+                            self.vk.messages.setActivity(
+                                user_id=user_id,
+                                type='typing'
+                            )
+                        except:
+                            pass
+                        response_data = self.get_contextual_response(user_id, text)
+                        response_text = response_data["text"]
+                        response_keyboard = response_data.get("keyboard", "main")
+                        self.update_user_history(user_id, text, response_text)
+                        self.send_message(user_id, response_text, response_keyboard)
+            except Exception as e:
+                logger.error(f"Ошибка в основном цикле: {e}")
+                time.sleep(10)
