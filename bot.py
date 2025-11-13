@@ -6,6 +6,7 @@ from config import Config
 import logging
 import time
 import re
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -18,28 +19,43 @@ class FotoTochkaBot:
         self.user_sessions = {}
         logger.info("Бот ФотоТочка инициализирован успешно")
     
-    def send_message(self, user_id, message):
+    def create_keyboard(self, keyboard_name):
+        """Создание клавиатуры по имени"""
+        if keyboard_name in Config.KEYBOARDS:
+            return Config.KEYBOARDS[keyboard_name]
+        return None
+    
+    def send_message(self, user_id, message, keyboard_name="main"):
+        """Отправка сообщения с клавиатурой"""
         try:
+            keyboard = self.create_keyboard(keyboard_name)
+            keyboard_json = json.dumps(keyboard) if keyboard else None
+            
             if len(message) > 4096:
                 chunks = [message[i:i+4096] for i in range(0, len(message), 4096)]
-                for chunk in chunks:
+                for i, chunk in enumerate(chunks):
+                    # Клавиатуру отправляем только с последним сообщением
+                    current_keyboard = keyboard_json if i == len(chunks) - 1 else None
                     self.vk.messages.send(
                         user_id=user_id,
                         message=chunk,
-                        random_id=get_random_id()
+                        random_id=get_random_id(),
+                        keyboard=current_keyboard
                     )
                     time.sleep(Config.BOT_SETTINGS["typing_delay"])
             else:
                 self.vk.messages.send(
                     user_id=user_id,
                     message=message,
-                    random_id=get_random_id()
+                    random_id=get_random_id(),
+                    keyboard=keyboard_json
                 )
-            logger.info(f"Сообщение отправлено пользователю {user_id}")
+            logger.info(f"Сообщение отправлено пользователю {user_id} с клавиатурой {keyboard_name}")
         except Exception as e:
             logger.error(f"Ошибка отправки сообщения: {e}")
     
     def get_user_session(self, user_id):
+        """Получение сессии пользователя"""
         if user_id not in self.user_sessions:
             self.user_sessions[user_id] = {
                 'history': [],
@@ -49,9 +65,31 @@ class FotoTochkaBot:
         return self.user_sessions[user_id]
     
     def find_best_answer(self, text):
+        """Поиск лучшего ответа в базе знаний"""
         text_lower = text.lower().strip()
         clean_text = re.sub(r'[^\w\s]', '', text_lower)
         
+        # Сопоставление текста кнопок с ответами
+        button_text_map = {
+            "📚 услуги": "услуг",
+            "💎 цены": "цена", 
+            "📞 контакты": "контакт",
+            "🚚 доставка": "доставк",
+            "💳 оплата": "оплат",
+            "🆘 помощь": "help",
+            "📖 фотокниги": "фотокниг",
+            "🎨 холсты": "холст",
+            "🔧 реставрация": "реставрац",
+            "💻 обработка": "обработк",
+            "📧 email": "email",
+            "🔙 назад": "назад"
+        }
+        
+        # Проверка текста кнопок
+        if text in button_text_map:
+            return Config.KNOWLEDGE_BASE[button_text_map[text]]
+        
+        # Проверка команд
         command_map = {
             '/start': 'start',
             'start': 'start',
@@ -77,12 +115,6 @@ class FotoTochkaBot:
             '/contacts': 'контакт',
             'contacts': 'контакт',
             'контакты': 'контакт',
-            '/address': 'адрес',
-            'address': 'адрес',
-            'адрес': 'адрес',
-            '/schedule': 'график',
-            'schedule': 'график',
-            'график': 'график',
             '/delivery': 'доставк',
             'delivery': 'доставк',
             'доставк': 'доставк',
@@ -94,33 +126,34 @@ class FotoTochkaBot:
         if text_lower in command_map:
             return Config.KNOWLEDGE_BASE[command_map[text_lower]]
         
+        # Поиск по ключевым словам
         keywords_priority = [
-            ['фотопечат', 'распечат', 'печат', 'снимк', 'фотограф'],
-            ['10×15', '15×21', 'а4', 'а3', 'формат'],
             ['фотокниг', 'фотоальбом', 'альбом', 'книг'],
-            ['холст', 'картин', 'полотно', 'сувенир', 'кружк', 'магнит'],
+            ['холст', 'картин', 'полотно'],
+            ['реставрац', 'восстановлени', 'старое фото'],
+            ['обработк', 'photoshop', 'редактор', 'коллаж'],
             ['сколько стоит', 'цена', 'стоимость', 'прайс', 'ценник'],
-            ['контакт', 'телефон', 'email', 'позвонить', 'связаться'],
-            ['адрес', 'где находитесь', 'метро', 'проезд', 'локация'],
-            ['график', 'время работы', 'работаете', 'когда', 'воскресенье', 'суббот'],
-            ['услуг', 'предлагаете', 'делаете', 'изготовлени'],
+            ['контакт', 'email', 'связаться', 'instagram', 'telegram'],
             ['доставк', 'курьер', 'самовывоз', 'забрать', 'привезти'],
             ['оплат', 'рассчет', 'картой', 'наличными', 'безнал'],
             ['привет', 'здравствуйте', 'добрый', 'доброе'],
-            ['спасибо', 'благодарю']
+            ['спасибо', 'благодарю'],
+            ['назад', 'вернуться']
         ]
         
         for keyword_group in keywords_priority:
             for keyword in keyword_group:
                 if keyword in clean_text:
-                    for kb_key, answer in Config.KNOWLEDGE_BASE.items():
+                    for kb_key, answer_data in Config.KNOWLEDGE_BASE.items():
                         if kb_key in keyword_group:
                             logger.info(f"Найден ответ по ключевому слову: {keyword}")
-                            return answer
+                            return answer_data
         
+        # Ответ по умолчанию
         return Config.KNOWLEDGE_BASE['непонятно']
     
     def update_user_history(self, user_id, user_message, bot_response):
+        """Обновление истории диалога пользователя"""
         user_session = self.get_user_session(user_id)
         user_session['history'].append({
             'user': user_message,
@@ -135,6 +168,7 @@ class FotoTochkaBot:
             user_session['history'] = user_session['history'][-max_history:]
     
     def is_repeated_question(self, user_id, current_message):
+        """Проверка на повторяющийся вопрос"""
         user_session = self.get_user_session(user_id)
         current_lower = current_message.lower()
         for prev_question in user_session['last_questions']:
@@ -146,14 +180,16 @@ class FotoTochkaBot:
         return False
     
     def get_contextual_response(self, user_id, current_message):
+        """Получение контекстного ответа на основе истории"""
         user_session = self.get_user_session(user_id)
         if self.is_repeated_question(user_id, current_message):
-            return "📞 Вы уже спрашивали об этом! Уточните вопрос или позвоните нам: +7 (999) 123-45-67"
+            return Config.KNOWLEDGE_BASE['непонятно']
         if user_session['message_count'] == 0 and any(word in current_message.lower() for word in ['привет', 'здравствуй', 'start']):
             return Config.KNOWLEDGE_BASE['start']
         return self.find_best_answer(current_message)
     
     def run(self):
+        """Запуск бота"""
         logger.info("Бот ФотоТочка начал прослушивание сообщений...")
         while True:
             try:
@@ -172,9 +208,11 @@ class FotoTochkaBot:
                             )
                         except:
                             pass
-                        response = self.get_contextual_response(user_id, text)
-                        self.update_user_history(user_id, text, response)
-                        self.send_message(user_id, response)
+                        response_data = self.get_contextual_response(user_id, text)
+                        response_text = response_data["text"]
+                        response_keyboard = response_data.get("keyboard", "main")
+                        self.update_user_history(user_id, text, response_text)
+                        self.send_message(user_id, response_text, response_keyboard)
             except Exception as e:
                 logger.error(f"Ошибка в основном цикле: {e}")
                 time.sleep(10)
