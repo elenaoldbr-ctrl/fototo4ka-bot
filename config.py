@@ -4,6 +4,12 @@ class Config:
     # Токен бота из переменных окружения
     TELEGRAM_TOKEN = os.environ.get('TELEGRAM_TOKEN', '')
     
+    # VK настройки (если используются)
+    VK_GROUP_TOKEN = os.environ.get('VK_GROUP_TOKEN', '')
+    VK_GROUP_ID = os.environ.get('VK_GROUP_ID', '')
+    VK_CONFIRMATION_CODE = os.environ.get('VK_CONFIRMATION_CODE', '')
+    VK_SECRET_KEY = os.environ.get('VK_SECRET_KEY', '')
+    
     # ID администраторов (разделенные запятыми)
     ADMIN_IDS = [int(x) for x in os.environ.get('ADMIN_IDS', '').split(',') if x]
     
